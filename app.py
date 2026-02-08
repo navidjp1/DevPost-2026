@@ -1,6 +1,6 @@
 """
 BPM Workout Playlist Generator – Streamlit MVP
-with AI Running Coach powered by Dedalus Labs
+with AI Running Coach (K2-Think) & Music Curator (Dedalus Labs)
 """
 
 import os
@@ -20,8 +20,9 @@ from spotify_utils import (
     create_spotify_playlist,
 )
 from bpm_service import enrich_tracks_with_bpm
-from workout_playlist import build_workout_playlist, playlist_stats
-from ai_coach import generate_personalized_plan, generate_health_insights
+from workout_playlist import playlist_stats
+from agents.workout_designer import design_workout
+from agents.music_curator import curate_playlist, generate_health_insights
 
 # ─── Page config ────────────────────────────────────────────────────────
 st.set_page_config(
@@ -47,6 +48,12 @@ st.markdown(
     .warmup   { background: #f59e0b; }
     .peak     { background: #ef4444; }
     .cooldown { background: #3b82f6; }
+    .source-tag {
+        font-size: 0.65rem; font-weight: 600; padding: 2px 6px;
+        border-radius: 8px; display: inline-block; margin-left: 4px;
+    }
+    .familiar  { background: #22c55e; color: #fff; }
+    .discovery { background: #a855f7; color: #fff; }
     .coach-card {
         background: linear-gradient(135deg, #1e293b, #0f172a);
         border: 1px solid #334155; border-radius: 12px;
@@ -68,13 +75,18 @@ def _ms_to_min_sec(ms: int) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
-def _phase_label(idx: int, warmup_count: int, peak_count: int) -> str:
-    if idx < warmup_count:
-        return '<span class="phase-tag warmup">WARMUP</span>'
-    elif idx < warmup_count + peak_count:
-        return '<span class="phase-tag peak">PEAK</span>'
-    else:
-        return '<span class="phase-tag cooldown">COOLDOWN</span>'
+def _phase_tag(phase: str) -> str:
+    """Return an HTML phase tag based on the track's phase."""
+    label = phase.upper() if phase else "—"
+    css_class = phase if phase in ("warmup", "peak", "cooldown") else ""
+    return f'<span class="phase-tag {css_class}">{label}</span>'
+
+
+def _source_tag(source: str) -> str:
+    """Return an HTML source tag (familiar / discovery)."""
+    if source == "discovery":
+        return '<span class="source-tag discovery">NEW</span>'
+    return '<span class="source-tag familiar">YOURS</span>'
 
 
 # ─── Auth handling ──────────────────────────────────────────────────────
@@ -91,7 +103,7 @@ if not is_authed:
         "intensity — songs ramp up from a chill warmup to peak energy, "
         "then bring you back down for a cool-off."
     )
-    st.caption("Powered by AI coaching from Dedalus Labs & K2-Think")
+    st.caption("Powered by K2-Think AI Coach & Dedalus Labs Music Curator")
     auth_url = get_auth_url()
     st.link_button("🔗 Login with Spotify", auth_url, use_container_width=True)
     st.stop()
@@ -123,7 +135,7 @@ with st.sidebar:
         st.rerun()
 
 # =====================================================================
-# SCREEN 2 – Runner Profile  (NEW)
+# SCREEN 2 – Runner Profile
 # =====================================================================
 st.header("1. Your Runner Profile")
 st.write("Tell us about yourself so we can personalise your workout.")
@@ -159,26 +171,39 @@ if "user_playlists" not in st.session_state:
 
 playlists = st.session_state["user_playlists"]
 
-if not playlists:
-    st.warning("You don't have any playlists on Spotify!")
-    st.stop()
-
 selected_ids: list[str] = []
-cols_per_row = 2
-for i in range(0, len(playlists), cols_per_row):
-    cols = st.columns(cols_per_row)
-    for j, col in enumerate(cols):
-        idx = i + j
-        if idx >= len(playlists):
-            break
-        pl = playlists[idx]
-        with col:
-            checked = st.checkbox(
-                f"**{pl['name']}** ({pl['track_count']} tracks)",
-                key=f"pl_{pl['id']}",
-            )
-            if checked:
-                selected_ids.append(pl["id"])
+if playlists:
+    cols_per_row = 2
+    for i in range(0, len(playlists), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for j, col in enumerate(cols):
+            idx = i + j
+            if idx >= len(playlists):
+                break
+            pl = playlists[idx]
+            with col:
+                checked = st.checkbox(
+                    f"**{pl['name']}** ({pl['track_count']} tracks)",
+                    key=f"pl_{pl['id']}",
+                )
+                if checked:
+                    selected_ids.append(pl["id"])
+else:
+    st.info("No playlists found on your Spotify account.")
+
+# Genre fallback when no playlists selected
+genre_pref = ""
+if len(selected_ids) == 0:
+    st.markdown("---")
+    st.markdown(
+        "**No playlists selected?** No problem! Tell us your genre preferences "
+        "and we'll find great tracks for you."
+    )
+    genre_pref = st.text_input(
+        "Genre preferences",
+        placeholder="e.g. pop, hip-hop, electronic, rock",
+        help="Comma-separated genres. We'll search our dataset for matching tracks.",
+    )
 
 st.divider()
 
@@ -197,29 +222,30 @@ workout_minutes = st.slider(
 st.divider()
 
 # =====================================================================
-# Generate
+# Generate – no longer disabled when 0 playlists (genre fallback)
 # =====================================================================
+can_generate = len(selected_ids) > 0 or len(genre_pref.strip()) > 0
 generate = st.button(
     "🎵 Generate Workout Playlist",
     use_container_width=True,
-    disabled=len(selected_ids) == 0,
+    disabled=not can_generate,
 )
 
-if len(selected_ids) == 0:
-    st.info("Select at least one playlist above to get started.")
+if not can_generate:
+    st.info("Select at least one playlist or enter genre preferences above to get started.")
 
 if generate:
-    # ── AI Coach: personalised plan ─────────────────────────────────
-    with st.status("🤖 AI Coach is building your plan…", expanded=True) as status:
+    # ── Agent 1: Workout Designer (K2-Think) ─────────────────────────
+    with st.status("🤖 Agent 1: K2-Think is designing your workout…", expanded=True) as status:
         st.write("Analysing your profile and goals…")
-        plan = generate_personalized_plan(
+        plan = design_workout(
             age=runner_age,
             fitness_level=runner_fitness,
             goal=runner_goal,
             health_notes=runner_health,
             workout_minutes=workout_minutes,
         )
-        status.update(label="AI plan ready", state="complete")
+        status.update(label="✅ Workout plan ready (K2-Think)", state="complete")
 
     # Show coaching notes
     st.markdown(
@@ -246,56 +272,63 @@ if generate:
         z2.metric("🔴 Peak HR", hr.get("peak", "—"))
         z3.metric("🔵 Cooldown HR", hr.get("cooldown", "—"))
 
-    # Show recommended music BPM ranges
+    # Show recommended music BPM ranges (now as [min, max] arrays)
     b1, b2, b3 = st.columns(3)
-    b1.metric("🟡 Warmup BPM", plan.get("warmup_bpm_range", "—"))
-    b2.metric("🔴 Peak BPM", plan.get("peak_bpm_range", "—"))
-    b3.metric("🔵 Cooldown BPM", plan.get("cooldown_bpm_range", "—"))
+    warmup_bpm = plan.get("warmup_bpm_range", [90, 120])
+    peak_bpm = plan.get("peak_bpm_range", [140, 180])
+    cooldown_bpm = plan.get("cooldown_bpm_range", [90, 120])
+    b1.metric("🟡 Warmup BPM", f"{warmup_bpm[0]}–{warmup_bpm[1]}")
+    b2.metric("🔴 Peak BPM", f"{peak_bpm[0]}–{peak_bpm[1]}")
+    b3.metric("🔵 Cooldown BPM", f"{cooldown_bpm[0]}–{cooldown_bpm[1]}")
+
+    # Show safety notes if present
+    if plan.get("safety_notes"):
+        with st.expander("⚠️ Safety Notes from AI Coach", expanded=bool(runner_health)):
+            st.write(plan["safety_notes"])
 
     st.divider()
 
     # ── Gather tracks from selected playlists ───────────────────────
     all_tracks: list[dict] = []
-    with st.status("Fetching tracks from selected playlists…", expanded=True) as status:
-        for pid in selected_ids:
-            name = next((p["name"] for p in playlists if p["id"] == pid), pid)
-            st.write(f"📂 {name}")
-            tracks = fetch_playlist_tracks(sp, pid)
-            all_tracks.extend(tracks)
-        status.update(label=f"Fetched {len(all_tracks)} tracks", state="complete")
+    if selected_ids:
+        with st.status("Fetching tracks from selected playlists…", expanded=True) as status:
+            for pid in selected_ids:
+                name = next((p["name"] for p in playlists if p["id"] == pid), pid)
+                st.write(f"📂 {name}")
+                tracks = fetch_playlist_tracks(sp, pid)
+                all_tracks.extend(tracks)
+            status.update(label=f"Fetched {len(all_tracks)} tracks", state="complete")
 
-    if not all_tracks:
-        st.error("No tracks found in the selected playlists.")
-        st.stop()
+        # ── Look up BPMs ────────────────────────────────────────────
+        with st.status("Looking up BPM data…", expanded=True) as status:
+            progress_bar = st.progress(0, text="0%")
 
-    # ── Look up BPMs ────────────────────────────────────────────────
-    with st.status("Looking up BPM data…", expanded=True) as status:
-        progress_bar = st.progress(0, text="0%")
+            def _update_progress(current: int, total: int):
+                pct = current / total
+                progress_bar.progress(pct, text=f"{current}/{total} tracks")
 
-        def _update_progress(current: int, total: int):
-            pct = current / total
-            progress_bar.progress(pct, text=f"{current}/{total} tracks")
+            all_tracks = enrich_tracks_with_bpm(all_tracks, progress_callback=_update_progress)
+            found = sum(1 for t in all_tracks if t.get("bpm") is not None)
+            status.update(
+                label=f"BPM found for {found}/{len(all_tracks)} tracks",
+                state="complete",
+            )
 
-        all_tracks = enrich_tracks_with_bpm(all_tracks, progress_callback=_update_progress)
-        found = sum(1 for t in all_tracks if t.get("bpm") is not None)
-        status.update(
-            label=f"BPM found for {found}/{len(all_tracks)} tracks",
-            state="complete",
+    # ── Agent 2: Music Curator (Dedalus) ─────────────────────────────
+    with st.status("🎵 Agent 2: Dedalus is curating your playlist…", expanded=True) as status:
+        st.write("Balancing familiar tracks with new discoveries…")
+        playlist = curate_playlist(
+            workout_plan=plan,
+            familiar_tracks=all_tracks,
+            workout_minutes=workout_minutes,
+            genre_pref=genre_pref if genre_pref.strip() else None,
         )
-
-    # ── Build the playlist with AI-personalised fractions ───────────
-    playlist = build_workout_playlist(
-        all_tracks,
-        workout_minutes,
-        warmup_frac=plan["warmup_frac"],
-        peak_frac=plan["peak_frac"],
-        cooldown_frac=plan["cooldown_frac"],
-    )
+        status.update(label="✅ Playlist curated (Dedalus)", state="complete")
 
     if not playlist:
         st.error(
-            "Could not build a playlist — no tracks with BPM data. "
-            "Try selecting playlists with more popular / well-known songs."
+            "Could not build a playlist — not enough tracks matched the BPM ranges. "
+            "Try selecting more playlists or providing genre preferences."
         )
         st.stop()
 
@@ -316,6 +349,13 @@ if generate:
     c3.metric("BPM Range", f"{stats['min_bpm']}–{stats['max_bpm']}")
     c4.metric("Avg BPM", stats["avg_bpm"])
 
+    # Source breakdown
+    familiar_count = sum(1 for t in playlist if t.get("source") == "familiar")
+    discovery_count = sum(1 for t in playlist if t.get("source") == "discovery")
+    s1, s2 = st.columns(2)
+    s1.metric("🟢 Familiar Tracks", familiar_count)
+    s2.metric("🟣 New Discoveries", discovery_count)
+
     # ── BPM curve chart ─────────────────────────────────────────────
     st.subheader("Your Personalised BPM Curve")
     bpm_data = [{"Track #": i + 1, "BPM": t["bpm"]} for i, t in enumerate(playlist)]
@@ -326,33 +366,11 @@ if generate:
         color="#ef4444",
     )
 
-    # ── Figure out phase boundaries for labels ──────────────────────
-    total_ms = workout_minutes * 60 * 1000
-    warmup_target = total_ms * plan["warmup_frac"]
-    peak_target = total_ms * plan["peak_frac"]
-
-    cum_ms = 0
-    warmup_count = 0
-    for t in playlist:
-        cum_ms += t["duration_ms"]
-        if cum_ms <= warmup_target:
-            warmup_count += 1
-        else:
-            break
-
-    cum_ms = 0
-    peak_count = 0
-    for t in playlist[warmup_count:]:
-        cum_ms += t["duration_ms"]
-        if cum_ms <= peak_target:
-            peak_count += 1
-        else:
-            break
-
     # ── Track list ──────────────────────────────────────────────────
     st.subheader("Tracklist")
     for i, track in enumerate(playlist):
-        phase = _phase_label(i, warmup_count, peak_count)
+        phase = _phase_tag(track.get("phase", ""))
+        source = _source_tag(track.get("source", "familiar"))
         art = track.get("album_art") or ""
         img_html = f'<img src="{art}" width="40" height="40"/>' if art else ""
         st.markdown(
@@ -367,7 +385,7 @@ if generate:
                     {track['bpm']} BPM<br>
                     <span style="opacity:0.6">{_ms_to_min_sec(track['duration_ms'])}</span>
                 </div>
-                <div style="min-width:80px; text-align:right">{phase}</div>
+                <div style="min-width:120px; text-align:right">{phase} {source}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -376,10 +394,10 @@ if generate:
     st.divider()
 
     # =====================================================================
-    # Health Insights  (NEW)
+    # Health Insights (Dedalus)
     # =====================================================================
     st.subheader("🩺 Health Insights")
-    st.caption("Powered by AI coaching from Dedalus Labs")
+    st.caption("Powered by Dedalus Labs")
 
     with st.spinner("Generating health insights…"):
         insights = generate_health_insights(
@@ -444,7 +462,8 @@ if generate:
                 track_uris=track_uris,
                 description=(
                     f"AI-personalised BPM workout playlist ({workout_minutes} min) "
-                    f"· {runner_fitness} · {runner_goal}"
+                    f"· {runner_fitness} · {runner_goal} "
+                    f"· K2-Think + Dedalus Labs"
                 ),
             )
         st.success(f"Playlist created! [Open in Spotify]({url})")

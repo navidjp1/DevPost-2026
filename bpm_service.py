@@ -1,5 +1,5 @@
 """
-BPM lookup using a local Spotify dataset.
+BPM lookup and discovery using a local Spotify dataset.
 
 Dataset: https://huggingface.co/datasets/maharshipandya/spotify-tracks-dataset
 Contains ~114K tracks with BPM data.
@@ -8,6 +8,12 @@ Contains ~114K tracks with BPM data.
 import os
 import pandas as pd
 import streamlit as st
+
+
+_CSV_COLUMNS = [
+    "track_id", "track_name", "artists", "duration_ms",
+    "tempo", "track_genre", "popularity",
+]
 
 
 # ── Load the CSV once and build a track_id -> tempo lookup ──────────────
@@ -28,6 +34,19 @@ def _load_bpm_dataset() -> dict[str, int]:
         row["track_id"]: int(round(row["tempo"]))
         for _, row in df.iterrows()
     }
+
+
+@st.cache_data(show_spinner=False)
+def _load_full_dataset() -> pd.DataFrame:
+    """Load the full CSV with track metadata for discovery searches."""
+    csv_path = os.path.join(os.path.dirname(__file__), "data", "spotify_tracks.csv")
+    if not os.path.exists(csv_path):
+        return pd.DataFrame()
+
+    df = pd.read_csv(csv_path, usecols=_CSV_COLUMNS)
+    df = df.dropna(subset=["track_id", "tempo"])
+    df["tempo"] = df["tempo"].round().astype(int)
+    return df
 
 
 def enrich_tracks_with_bpm(
@@ -55,3 +74,78 @@ def enrich_tracks_with_bpm(
             progress_callback(i + 1, total)
 
     return tracks
+
+
+def search_tracks_by_bpm(
+    min_bpm: int,
+    max_bpm: int,
+    genre: str | None = None,
+    exclude_ids: set[str] | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """
+    Search the local CSV dataset for tracks within a BPM range.
+
+    Parameters
+    ----------
+    min_bpm, max_bpm : int
+        Inclusive BPM bounds.
+    genre : str or None
+        Optional genre filter (case-insensitive substring match).
+        Can be a comma-separated string of genres, e.g. "pop, hip-hop".
+    exclude_ids : set[str] or None
+        Track IDs to skip (e.g. already-selected familiar tracks).
+    limit : int
+        Max number of tracks to return.
+
+    Returns
+    -------
+    list[dict]
+        Each dict has: id, uri, name, artist, duration_ms, bpm, genre.
+    """
+    df = _load_full_dataset()
+    if df.empty:
+        return []
+
+    # Filter by BPM range
+    mask = (df["tempo"] >= min_bpm) & (df["tempo"] <= max_bpm)
+
+    # Filter by genre(s) if provided
+    if genre:
+        genre_parts = [g.strip().lower() for g in genre.split(",") if g.strip()]
+        if genre_parts:
+            genre_mask = df["track_genre"].str.lower().isin(genre_parts)
+            # If genre filter yields results, use it; otherwise skip
+            if genre_mask.any():
+                mask = mask & genre_mask
+
+    df_filtered = df[mask].copy()
+
+    # Exclude already-selected track IDs
+    if exclude_ids:
+        df_filtered = df_filtered[~df_filtered["track_id"].isin(exclude_ids)]
+
+    if df_filtered.empty:
+        return []
+
+    # Prefer more popular tracks for better discovery
+    df_filtered = df_filtered.sort_values("popularity", ascending=False)
+
+    # Take the top results
+    df_filtered = df_filtered.head(limit)
+
+    # Build result list
+    results = []
+    for _, row in df_filtered.iterrows():
+        results.append({
+            "id": row["track_id"],
+            "uri": f"spotify:track:{row['track_id']}",
+            "name": row["track_name"],
+            "artist": row["artists"],
+            "duration_ms": int(row["duration_ms"]) if pd.notna(row["duration_ms"]) else 210000,
+            "bpm": int(row["tempo"]),
+            "genre": row["track_genre"] if pd.notna(row["track_genre"]) else "",
+            "source": "discovery",
+        })
+
+    return results
