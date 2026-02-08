@@ -8,7 +8,9 @@ import json
 import os
 from datetime import date
 
+import folium
 import streamlit as st
+from streamlit_folium import st_folium
 
 # #region agent log
 DEBUG_LOG_PATH = os.path.join(os.path.dirname(__file__), ".cursor", "debug.log")
@@ -36,10 +38,16 @@ from bpm_service import enrich_tracks_with_bpm
 from workout_playlist import playlist_stats
 from agents.workout_designer import design_workout
 from agents.music_curator import curate_playlist, generate_health_insights
+from route_service import (
+    get_running_route,
+    bpm_to_pace_min_per_km,
+    format_pace,
+    parse_coords,
+)
 
 # ─── Page config ────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="BPM Workout Playlist",
+    page_title="BeatMatch",
     page_icon="🏃",
     layout="centered",
 )
@@ -109,14 +117,14 @@ is_authed = handle_auth_callback()
 # SCREEN 1 – Login
 # =====================================================================
 if not is_authed:
-    st.title("🏃 BPM Workout Playlist")
+    st.title("BeatMatch")
     st.subheader("Run to the beat.")
     st.write(
         "Generate a personalised playlist that matches your workout "
         "intensity — songs ramp up from a chill warmup to peak energy, "
         "then bring you back down for a cool-off."
     )
-    st.caption("Powered by K2-Think AI Coach & Dedalus Labs Music Curator")
+    st.caption("Powered by K2-Think & Dedalus Labs")
     auth_url = get_auth_url()
     st.link_button("🔗 Login with Spotify", auth_url, use_container_width=True)
     st.stop()
@@ -137,7 +145,7 @@ try:
 except Exception:
     display_name = "Runner"
 
-st.title("🏃 BPM Workout Playlist")
+st.title("BeatMatch")
 st.caption(f"Logged in as **{display_name}**")
 
 # Logout button in sidebar
@@ -232,6 +240,19 @@ workout_minutes = st.slider(
     step=5,
 )
 
+DEDALUS_MODEL_OPTIONS = [
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "google/gemini-2.5-pro",
+    "google/gemini-2.0-flash",
+]
+dedalus_model = st.selectbox(
+    "Dedalus model (playlist curation)",
+    options=DEDALUS_MODEL_OPTIONS,
+    index=0,
+    help="AI model used by Dedalus for discovery hints and track ordering.",
+)
+
 st.divider()
 
 # =====================================================================
@@ -294,6 +315,7 @@ if generate:
             familiar_tracks=all_tracks,
             workout_minutes=workout_minutes,
             genre_pref=genre_pref if genre_pref.strip() else None,
+            dedalus_model=dedalus_model,
         )
         status.update(label="✅ Playlist curated (Dedalus)", state="complete")
 
@@ -307,16 +329,19 @@ if generate:
     # Store in session state so results persist after Save button click
     stats = playlist_stats(playlist)
 
-    # Clear any previously saved URL and cached insights when generating a new playlist
+    # Clear any previously saved URL, cached insights, and route when generating a new playlist
     if "saved_spotify_url" in st.session_state:
         del st.session_state["saved_spotify_url"]
     if "generated_insights" in st.session_state:
         del st.session_state["generated_insights"]
+    if "generated_route" in st.session_state:
+        del st.session_state["generated_route"]
 
     st.session_state["generated_playlist"] = playlist
     st.session_state["generated_plan"] = plan
     st.session_state["generated_stats"] = stats
     st.session_state["generated_workout_minutes"] = workout_minutes
+    st.session_state["generated_dedalus_model"] = dedalus_model
     st.session_state["generated_runner_age"] = runner_age
     st.session_state["generated_runner_fitness"] = runner_fitness
     st.session_state["generated_runner_goal"] = runner_goal
@@ -386,12 +411,12 @@ if "generated_playlist" in st.session_state:
     c3.metric("BPM Range", f"{stats['min_bpm']}–{stats['max_bpm']}")
     c4.metric("Avg BPM", stats["avg_bpm"])
 
-    # Source breakdown
-    familiar_count = sum(1 for t in playlist if t.get("source") == "familiar")
-    discovery_count = sum(1 for t in playlist if t.get("source") == "discovery")
-    s1, s2 = st.columns(2)
-    s1.metric("🟢 Familiar Tracks", familiar_count)
-    s2.metric("🟣 New Discoveries", discovery_count)
+    # # Source breakdown
+    # familiar_count = sum(1 for t in playlist if t.get("source") == "familiar")
+    # discovery_count = sum(1 for t in playlist if t.get("source") == "discovery")
+    # s1, s2 = st.columns(2)
+    # s1.metric("🟢 Familiar Tracks", familiar_count)
+    # s2.metric("🟣 New Discoveries", discovery_count)
 
     # ── BPM curve chart ─────────────────────────────────────────────
     st.subheader("Your Personalised BPM Curve")
@@ -412,6 +437,8 @@ if "generated_playlist" in st.session_state:
         img_html = f'<img src="{html.escape(art)}" width="40" height="40"/>' if art else ""
         name_escaped = html.escape(str(track.get("name", "")))
         artist_escaped = html.escape(str(track.get("artist", "")))
+        bpm = track.get("bpm") or 0
+        pace_str = format_pace(bpm_to_pace_min_per_km(bpm), unit="mi") if bpm else "—"
         row_html = (
             f'<div class="track-row">'
             f"{img_html}"
@@ -423,6 +450,7 @@ if "generated_playlist" in st.session_state:
             f"{track['bpm']} BPM<br>"
             f'<span style="opacity:0.6">{_ms_to_min_sec(track["duration_ms"])}</span>'
             f"</div>"
+            f'<div style="text-align:right; min-width:80px">~{html.escape(pace_str)}</div>'
             f'<div style="min-width:120px; text-align:right">{phase} {source}</div>'
             f"</div>"
         )
@@ -449,6 +477,7 @@ if "generated_playlist" in st.session_state:
                 min_bpm=stats["min_bpm"],
                 max_bpm=stats["max_bpm"],
                 total_duration_min=stats["total_duration_min"],
+                model=st.session_state.get("generated_dedalus_model"),
             )
     insights = st.session_state["generated_insights"]
 
@@ -519,4 +548,82 @@ if "generated_playlist" in st.session_state:
             'border-radius:20px;text-decoration:none;font-weight:600;text-align:center;">'
             "🎵 Open in Spotify</a>",
             unsafe_allow_html=True,
+        )
+
+    # =====================================================================
+    # Plan your running route
+    # =====================================================================
+    st.divider()
+    st.subheader("Plan your running route")
+    st.caption(
+        "Generate a round-trip route from a start location, matched to your "
+        "workout duration and average BPM. Elevation and phase alignment are shown below."
+    )
+
+    route_location = st.text_input(
+        "Start location",
+        placeholder="e.g. Central Park, NYC or 40.7829, -73.9654",
+        key="route_start_location",
+    )
+
+    if st.button("Generate route", key="generate_route_btn"):
+        if not route_location or not route_location.strip():
+            st.warning("Enter an address or lat,lng to generate a route.")
+        else:
+            with st.spinner("Finding route…"):
+                start_input = route_location.strip()
+                use_lat_lng = parse_coords(start_input) is not None
+
+                route_result = get_running_route(
+                    start_input,
+                    workout_minutes=workout_minutes,
+                    avg_bpm=stats["avg_bpm"],
+                    use_lat_lng=use_lat_lng,
+                )
+                if route_result:
+                    st.session_state["generated_route"] = route_result
+                    st.success("Route generated.")
+                else:
+                    st.error(
+                        "Could not find a route for that location. "
+                        "Check the address or try pasting lat,lng. Ensure OPENROUTE_SERVICE_API_KEY is set."
+                    )
+
+    if "generated_route" in st.session_state:
+        route_data = st.session_state["generated_route"]
+        summary = route_data["summary"]
+        geometry = route_data["geometry"]
+        elevation_profile = route_data["elevation_profile"]
+        start_coords = route_data["start_coords"]
+        lon0, lat0 = start_coords[0], start_coords[1]
+
+        # Est. run time from distance and running pace (not ORS walking duration)
+        pace_min_per_km = bpm_to_pace_min_per_km(stats["avg_bpm"])
+        speed_m_per_min = 1000 / pace_min_per_km if pace_min_per_km else 0
+        est_run_min = round(summary["distance_m"] / speed_m_per_min) if speed_m_per_min else 0
+
+        st.metric("Route distance", f"{summary['distance_m'] / 1609.34:.1f} mi")
+        st.metric("Est. run time", f"~{est_run_min} min")
+        st.caption(f"Planned workout: {workout_minutes} min")
+
+        m = folium.Map(location=[lat0, lon0], zoom_start=14)
+        # Folium expects (lat, lon); geometry is [lon, lat] or [lon, lat, z]
+        route_lat_lon = [(p[1], p[0]) for p in geometry]
+        folium.PolyLine(route_lat_lon, color="#ef4444", weight=5, opacity=0.8).add_to(m)
+        folium.Marker([lat0, lon0], popup="Start / End", tooltip="Start / End").add_to(m)
+        st_folium(m, use_container_width=True, key="route_map")
+        st.caption("Round trip: starts and ends at the same point.")
+
+        if elevation_profile:
+            st.caption("Elevation along the route")
+            elev_data = [
+                {"Distance (km)": round(p["distance_m"] / 1000, 2), "Elevation (m)": p["elev_m"]}
+                for p in elevation_profile
+            ]
+            st.line_chart(elev_data, x="Distance (km)", y="Elevation (m)")
+
+        st.info(
+            "Warmup aligns with the start of the route, peak with the middle, "
+            "and cooldown with the end. Consider saving steep climbs for warmup/cooldown "
+            "and using flatter sections for peak effort."
         )

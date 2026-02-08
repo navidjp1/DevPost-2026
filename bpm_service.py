@@ -6,6 +6,7 @@ Contains ~114K tracks with BPM data.
 """
 
 import os
+
 import pandas as pd
 import streamlit as st
 
@@ -82,6 +83,8 @@ def search_tracks_by_bpm(
     genre: str | None = None,
     exclude_ids: set[str] | None = None,
     limit: int = 50,
+    artist_hints: list[str] | None = None,
+    diverse: bool = True,
 ) -> list[dict]:
     """
     Search the local CSV dataset for tracks within a BPM range.
@@ -91,12 +94,18 @@ def search_tracks_by_bpm(
     min_bpm, max_bpm : int
         Inclusive BPM bounds.
     genre : str or None
-        Optional genre filter (case-insensitive substring match).
+        Optional genre filter (case-insensitive).
         Can be a comma-separated string of genres, e.g. "pop, hip-hop".
     exclude_ids : set[str] or None
         Track IDs to skip (e.g. already-selected familiar tracks).
     limit : int
         Max number of tracks to return.
+    artist_hints : list[str] or None
+        Optional artist names. Tracks by these artists are boosted
+        (included first), but the pool is not limited to them.
+    diverse : bool
+        If True (default), mix popular and less-popular tracks so the
+        pool varies across runs.  If False, return top-N by popularity.
 
     Returns
     -------
@@ -128,11 +137,45 @@ def search_tracks_by_bpm(
     if df_filtered.empty:
         return []
 
-    # Prefer more popular tracks for better discovery
-    df_filtered = df_filtered.sort_values("popularity", ascending=False)
+    # ── Artist-hint boosting ────────────────────────────────────────
+    # Separate artist-matched rows so they get priority slots
+    artist_rows = pd.DataFrame()
+    if artist_hints:
+        patterns = [ah.lower() for ah in artist_hints if ah]
+        if patterns:
+            artist_mask = df_filtered["artists"].str.lower().apply(
+                lambda a: any(p in str(a) for p in patterns)
+            )
+            artist_rows = df_filtered[artist_mask]
+            # Remove artist rows from general pool to avoid doubles
+            df_filtered = df_filtered[~artist_mask]
 
-    # Take the top results
-    df_filtered = df_filtered.head(limit)
+    # ── Diversity sampling ──────────────────────────────────────────
+    if diverse and len(df_filtered) > limit:
+        # Split into popular half and less-popular half
+        df_sorted = df_filtered.sort_values("popularity", ascending=False)
+        mid = len(df_sorted) // 2
+        top_half = df_sorted.iloc[:mid]
+        bottom_half = df_sorted.iloc[mid:]
+
+        # Take 60% from top, 40% from bottom (randomly sampled)
+        n_top = int(limit * 0.6)
+        n_bottom = limit - n_top
+        top_sample = top_half.sample(n=min(n_top, len(top_half)), random_state=None)
+        bottom_sample = bottom_half.sample(n=min(n_bottom, len(bottom_half)), random_state=None)
+        df_filtered = pd.concat([top_sample, bottom_sample])
+    else:
+        df_filtered = df_filtered.sort_values("popularity", ascending=False).head(limit)
+
+    # Combine: artist-matched first, then general pool
+    if not artist_rows.empty:
+        # Cap artist rows to ~30% of limit so they don't dominate
+        artist_cap = max(3, int(limit * 0.3))
+        artist_rows = artist_rows.sort_values("popularity", ascending=False).head(artist_cap)
+        df_filtered = pd.concat([artist_rows, df_filtered]).head(limit)
+
+    # Shuffle so the order isn't deterministic
+    df_filtered = df_filtered.sample(frac=1, random_state=None)
 
     # Build result list
     results = []

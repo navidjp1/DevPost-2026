@@ -4,3 +4,5 @@ requests
 python-dotenv
 pandas
 dedalus-labs
+folium
+streamlit-folium

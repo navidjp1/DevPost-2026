@@ -13,7 +13,7 @@ import requests
 from bpm_service import enrich_tracks_with_bpm, search_tracks_by_bpm
 
 DEDALUS_API_URL = "https://api.dedaluslabs.ai/v1/chat/completions"
-MODEL = "openai/gpt-4o"
+MODEL = "google/gemini-2.5-pro"
 
 # Target mix: 70% familiar / 30% discovery (adjustable)
 FAMILIAR_RATIO = 0.70
@@ -23,7 +23,7 @@ def _dedalus_api_key() -> str:
     return os.getenv("DEDALUS_API_KEY", "")
 
 
-def _call_dedalus(system_prompt: str, user_prompt: str) -> str:
+def _call_dedalus(system_prompt: str, user_prompt: str, model: str | None = None) -> str:
     """Send a chat completion to Dedalus and return assistant text."""
     api_key = _dedalus_api_key()
     if not api_key:
@@ -36,7 +36,7 @@ def _call_dedalus(system_prompt: str, user_prompt: str) -> str:
             "Content-Type": "application/json",
         },
         json={
-            "model": MODEL,
+            "model": model or MODEL,
             "messages": [
                 {"role": "user", "content": user_prompt},
             ],
@@ -114,6 +114,79 @@ def _infer_genres(tracks: list[dict]) -> str:
     return ""
 
 
+# ── Dedalus discovery hints ────────────────────────────────────────────
+
+def _ask_dedalus_discovery_hints(
+    familiar_tracks: list[dict],
+    genre_pref: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """
+    Ask Dedalus to suggest genres and artist hints for discovering new
+    tracks that complement the user's familiar tracks.
+
+    Returns a dict like:
+        {"genres": ["reggaeton", "latin pop"], "artist_hints": ["Bad Bunny"]}
+    Falls back to inferred genres if the API call fails.
+    """
+    # Build a compact taste summary (up to 15 tracks)
+    sample = familiar_tracks[:15]
+    taste_summary = [
+        {"name": t.get("name", ""), "artist": t.get("artist", "")}
+        for t in sample
+    ]
+
+    system_prompt = (
+        "You are a music discovery expert. Given a user's favourite tracks "
+        "and optional genre preference, suggest related genres and artists "
+        "to explore for new track discovery. Always respond with valid JSON only."
+    )
+
+    genre_hint = f"\nUser's stated genre preference: {genre_pref}" if genre_pref else ""
+
+    user_prompt = f"""Here are tracks from the user's playlists:
+{json.dumps(taste_summary, indent=2)}
+{genre_hint}
+
+Based on these tracks, suggest genres and artists for discovering similar but fresh music.
+
+IMPORTANT: The genres you suggest will be used to search a Spotify dataset where the genre column
+contains values like: pop, hip-hop, latin, reggaeton, r-n-b, rock, edm, dance, acoustic,
+classical, jazz, blues, country, folk, indie, alternative, metal, punk, soul, funk, disco,
+electronic, house, techno, trance, dubstep, trap, k-pop, j-pop, anime, ambient, chill,
+sleep, study, party, romance, sad, happy, workout, etc.
+
+Return a JSON object with EXACTLY these keys:
+{{
+  "genres": ["genre1", "genre2", "genre3", "genre4", "genre5"],
+  "artist_hints": ["artist1", "artist2", "artist3"]
+}}
+
+Rules:
+- Suggest 3-6 genres that are similar or adjacent to the user's taste
+- Include the user's main genre(s) PLUS at least 2 related/adjacent genres
+- Suggest 2-4 artist names whose music would complement the user's taste
+- Think about cross-genre connections (e.g. a reggaeton fan might enjoy dance pop or latin pop)
+"""
+
+    fallback = {
+        "genres": [g.strip() for g in (genre_pref or "").split(",") if g.strip()],
+        "artist_hints": [],
+    }
+
+    try:
+        raw = _call_dedalus(system_prompt, user_prompt, model=model)
+        result = json.loads(raw)
+        genres = result.get("genres", [])
+        artist_hints = result.get("artist_hints", [])
+        # Ensure we got something useful
+        if not genres and not artist_hints:
+            return fallback
+        return {"genres": genres, "artist_hints": artist_hints}
+    except Exception:
+        return fallback
+
+
 # ── Dedalus curation call ─────────────────────────────────────────────
 
 def _ask_dedalus_to_curate(
@@ -121,6 +194,7 @@ def _ask_dedalus_to_curate(
     candidates: list[dict],
     target_duration_ms: int,
     bpm_range: list[int],
+    model: str | None = None,
 ) -> list[str]:
     """
     Send candidate tracks to Dedalus and ask it to pick and order the
@@ -150,13 +224,14 @@ def _ask_dedalus_to_curate(
     user_prompt = f"""Select and order tracks for the {phase.upper()} phase of a running workout.
 
 Requirements:
-- Target duration: ~{target_min} minutes
+- Target duration: AT LEAST {target_min} minutes (this is critical — you MUST select enough tracks so their total duration_ms reaches at least {target_duration_ms} ms). It is better to slightly overshoot than undershoot.
 - BPM range: {bpm_range[0]}-{bpm_range[1]} BPM
 - Aim for ~70% familiar tracks and ~30% discovery tracks
 - {"Warmup: arrange BPM ascending (low to high)" if phase == "warmup" else ""}
 - {"Peak: keep BPM high, vary slightly to maintain energy" if phase == "peak" else ""}
 - {"Cooldown: arrange BPM descending (high to low)" if phase == "cooldown" else ""}
 - Ensure smooth BPM transitions between consecutive tracks
+- Do NOT repeat any track ID — every entry in track_ids must be unique
 
 Available tracks:
 {json.dumps(track_info, indent=2)}
@@ -167,11 +242,11 @@ Return a JSON object with EXACTLY these keys:
   "reasoning": "<brief explanation of your curation choices>"
 }}
 
-Select enough tracks to fill ~{target_min} minutes. If there aren't enough tracks, include all available ones and explain in reasoning.
+You MUST include enough tracks so their combined duration_ms totals at least {target_duration_ms} ms (~{target_min} min). Prefer including more tracks rather than fewer. If there aren't enough tracks to reach the target, include ALL available ones.
 """
 
     try:
-        raw = _call_dedalus(system_prompt, user_prompt)
+        raw = _call_dedalus(system_prompt, user_prompt, model=model)
         result = json.loads(raw)
         return result.get("track_ids", [])
     except Exception:
@@ -196,6 +271,7 @@ def generate_health_insights(
     min_bpm: int,
     max_bpm: int,
     total_duration_min: float,
+    model: str | None = None,
 ) -> dict:
     """
     After the playlist is built, generate health insights about the workout.
@@ -264,7 +340,7 @@ Return a JSON object with EXACTLY these keys:
     }
 
     try:
-        raw = _call_dedalus(system_prompt, user_prompt)
+        raw = _call_dedalus(system_prompt, user_prompt, model=model)
         insights = json.loads(raw)
 
         required = [
@@ -288,6 +364,7 @@ def curate_playlist(
     familiar_tracks: list[dict],
     workout_minutes: int,
     genre_pref: str | None = None,
+    dedalus_model: str | None = None,
 ) -> list[dict]:
     """
     Build a curated playlist using the workout plan from Agent 1.
@@ -304,6 +381,8 @@ def curate_playlist(
         Target workout duration.
     genre_pref : str or None
         User-provided genre preference (used when no playlists selected).
+    dedalus_model : str or None
+        Dedalus model ID for curation (e.g. openai/gpt-4o). If None, module default is used.
 
     Returns
     -------
@@ -332,6 +411,21 @@ def curate_playlist(
     if not genre_pref:
         genre_pref = _infer_genres(familiar_with_bpm)
 
+    # ── Ask Dedalus for discovery hints (genres + artist hints) ─────
+    # This gives us AI-suggested genres and artists to diversify the pool
+    discovery_hints = _ask_dedalus_discovery_hints(familiar_with_bpm, genre_pref, model=dedalus_model)
+    hint_genres = discovery_hints.get("genres", [])
+    hint_artists = discovery_hints.get("artist_hints", [])
+
+    # Merge Dedalus-suggested genres with user/inferred genre
+    all_genres_list = list(hint_genres)
+    if genre_pref:
+        for g in genre_pref.split(","):
+            g = g.strip().lower()
+            if g and g not in [x.lower() for x in all_genres_list]:
+                all_genres_list.append(g)
+    discovery_genre_str = ", ".join(all_genres_list) if all_genres_list else None
+
     # 2. For each phase, check if we have enough tracks; fill gaps with discoveries
     phases = ["warmup", "peak", "cooldown"]
     phase_ranges = {
@@ -356,16 +450,18 @@ def curate_playlist(
         candidates = list(phase_familiar)
         if familiar_ms < target_ms:
             needed_ms = target_ms - familiar_ms
-            # Estimate how many tracks we need (~3.5 min avg = 210000ms per track)
-            est_needed = max(5, int(needed_ms / 210000) + 3)
+            # Use ~3 min avg and generous buffer so we never under-fill
+            est_needed = min(80, max(12, int(needed_ms / 180_000) + 6))
 
             bpm_range = phase_ranges[phase]
             discovery = search_tracks_by_bpm(
                 min_bpm=bpm_range[0],
                 max_bpm=bpm_range[1],
-                genre=genre_pref if genre_pref else None,
+                genre=discovery_genre_str,
                 exclude_ids=familiar_ids,
                 limit=est_needed,
+                artist_hints=hint_artists if hint_artists else None,
+                diverse=True,
             )
             candidates.extend(discovery)
 
@@ -382,24 +478,26 @@ def curate_playlist(
             candidates=candidates,
             target_duration_ms=target_ms,
             bpm_range=phase_ranges[phase],
+            model=dedalus_model,
         )
 
-        # Build ordered track list from IDs
+        # Build ordered track list from IDs (skip duplicates)
         id_to_track = {t["id"]: t for t in candidates}
         phase_tracks: list[dict] = []
+        added_ids: set[str] = set()
         total_ms = 0
 
         for tid in ordered_ids:
-            if tid in id_to_track and total_ms < target_ms:
+            if tid in id_to_track and tid not in added_ids and total_ms < target_ms:
                 track = id_to_track[tid]
                 track["phase"] = phase
                 phase_tracks.append(track)
+                added_ids.add(tid)
                 total_ms += track.get("duration_ms", 0)
 
         # If Dedalus didn't return enough, add remaining candidates
         if total_ms < target_ms:
-            used_ids = {t["id"] for t in phase_tracks}
-            remaining = [t for t in candidates if t["id"] not in used_ids]
+            remaining = [t for t in candidates if t["id"] not in added_ids]
             if phase == "warmup":
                 remaining.sort(key=lambda t: t.get("bpm", 0))
             elif phase == "cooldown":
@@ -410,8 +508,41 @@ def curate_playlist(
                     break
                 track["phase"] = phase
                 phase_tracks.append(track)
+                added_ids.add(track["id"])
                 total_ms += track.get("duration_ms", 0)
 
         final_playlist.extend(phase_tracks)
 
-    return final_playlist
+    # ── Global duration top-up ──────────────────────────────────────
+    # If the playlist is still more than 2 minutes short, add tracks
+    # to the last phase (cooldown) to fill the gap.
+    target_total_ms = workout_minutes * 60 * 1000
+    current_total_ms = _total_duration_ms(final_playlist)
+    shortfall_ms = target_total_ms - current_total_ms
+
+    if shortfall_ms > 2 * 60 * 1000:  # more than 2 min short
+        all_used_ids = {t["id"] for t in final_playlist}
+        # Use cooldown BPM range for top-up (ending songs)
+        topup_tracks = search_tracks_by_bpm(
+            min_bpm=cooldown_range[0],
+            max_bpm=cooldown_range[1],
+            genre=None,  # relaxed — any genre
+            exclude_ids=all_used_ids,
+            limit=20,
+        )
+        for track in topup_tracks:
+            if shortfall_ms <= 0:
+                break
+            track["phase"] = "cooldown"
+            final_playlist.append(track)
+            shortfall_ms -= track.get("duration_ms", 0)
+
+    # ── Final safety-net deduplication (keep first occurrence) ──────
+    seen_ids: set[str] = set()
+    deduped: list[dict] = []
+    for t in final_playlist:
+        if t["id"] not in seen_ids:
+            seen_ids.add(t["id"])
+            deduped.append(t)
+
+    return deduped
