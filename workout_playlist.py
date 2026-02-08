@@ -38,14 +38,24 @@ def _fill_phase(
 def build_workout_playlist(
     tracks: list[dict],
     workout_minutes: int,
+    warmup_frac: float | None = None,
+    peak_frac: float | None = None,
+    cooldown_frac: float | None = None,
 ) -> list[dict]:
     """
     Given *tracks* (each must have 'bpm' and 'duration_ms') and a workout
     duration in minutes, return an ordered list of tracks following the
     BPM curve:  warmup (ascending) → peak (high) → cooldown (descending).
 
+    Custom phase fractions can be supplied (from the AI coach); if omitted
+    the module-level defaults are used.
+
     Tracks with bpm=None are excluded.
     """
+    wf = warmup_frac if warmup_frac is not None else WARMUP_FRAC
+    pf = peak_frac if peak_frac is not None else PEAK_FRAC
+    cf = cooldown_frac if cooldown_frac is not None else COOLDOWN_FRAC
+
     # Filter out tracks with no BPM data and deduplicate by track id
     seen_ids: set[str] = set()
     valid: list[dict] = []
@@ -61,9 +71,9 @@ def build_workout_playlist(
     valid.sort(key=lambda t: t["bpm"])
 
     total_ms = workout_minutes * 60 * 1000
-    warmup_ms = int(total_ms * WARMUP_FRAC)
-    peak_ms = int(total_ms * PEAK_FRAC)
-    cooldown_ms = int(total_ms * COOLDOWN_FRAC)
+    warmup_ms = int(total_ms * wf)
+    peak_ms = int(total_ms * pf)
+    cooldown_ms = int(total_ms * cf)
 
     # ── Split into BPM tiers ────────────────────────────────────────────
     n = len(valid)
