@@ -124,7 +124,7 @@ if not is_authed:
         "intensity — songs ramp up from a chill warmup to peak energy, "
         "then bring you back down for a cool-off."
     )
-    st.caption("Powered by K2-Think AI Coach & Dedalus Labs Music Curator")
+    st.caption("Powered by K2-Think & Dedalus Labs")
     auth_url = get_auth_url()
     st.link_button("🔗 Login with Spotify", auth_url, use_container_width=True)
     st.stop()
