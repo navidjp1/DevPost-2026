@@ -3,10 +3,23 @@ BPM Workout Playlist Generator – Streamlit MVP
 with AI Running Coach (K2-Think) & Music Curator (Dedalus Labs)
 """
 
+import html
+import json
 import os
 from datetime import date
 
 import streamlit as st
+
+# #region agent log
+DEBUG_LOG_PATH = os.path.join(os.path.dirname(__file__), ".cursor", "debug.log")
+def _debug_log(message: str, data: dict, hypothesis_id: str = ""):
+    try:
+        payload = {"location": "app.py", "message": message, "data": data, "hypothesisId": hypothesis_id, "timestamp": __import__("time").time() * 1000}
+        with open(DEBUG_LOG_PATH, "a") as f:
+            f.write(json.dumps(payload) + "\n")
+    except Exception:
+        pass
+# #endregion
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -396,24 +409,24 @@ if "generated_playlist" in st.session_state:
         phase = _phase_tag(track.get("phase", ""))
         source = _source_tag(track.get("source", "familiar"))
         art = track.get("album_art") or ""
-        img_html = f'<img src="{art}" width="40" height="40"/>' if art else ""
-        st.markdown(
-            f"""
-            <div class="track-row">
-                {img_html}
-                <div style="flex:1">
-                    <strong>{track['name']}</strong><br>
-                    <span style="opacity:0.7">{track['artist']}</span>
-                </div>
-                <div style="text-align:right; min-width:70px">
-                    {track['bpm']} BPM<br>
-                    <span style="opacity:0.6">{_ms_to_min_sec(track['duration_ms'])}</span>
-                </div>
-                <div style="min-width:120px; text-align:right">{phase} {source}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        img_html = f'<img src="{html.escape(art)}" width="40" height="40"/>' if art else ""
+        name_escaped = html.escape(str(track.get("name", "")))
+        artist_escaped = html.escape(str(track.get("artist", "")))
+        row_html = (
+            f'<div class="track-row">'
+            f"{img_html}"
+            f'<div style="flex:1">'
+            f"<strong>{name_escaped}</strong><br>"
+            f'<span style="opacity:0.7">{artist_escaped}</span>'
+            f"</div>"
+            f'<div style="text-align:right; min-width:70px">'
+            f"{track['bpm']} BPM<br>"
+            f'<span style="opacity:0.6">{_ms_to_min_sec(track["duration_ms"])}</span>'
+            f"</div>"
+            f'<div style="min-width:120px; text-align:right">{phase} {source}</div>'
+            f"</div>"
         )
+        st.html(row_html)
 
     st.divider()
 

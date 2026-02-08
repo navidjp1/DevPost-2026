@@ -64,7 +64,7 @@ def _call_k2think(system_prompt: str, user_prompt: str) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
-    print(data)
+
     raw_content = data["choices"][0]["message"]["content"]
     return _extract_json(raw_content)
 
