@@ -15,6 +15,10 @@ import requests
 ORS_BASE = "https://api.openrouteservice.org"
 DEFAULT_STRIDE_M = 1.35
 
+# Walking routes follow roads, so actual path is often 2x+ straight-line.
+# Use a closer turn point so the returned route length matches target distance.
+PATH_OVERHEAD_FACTOR = 2.0
+
 
 # ── Pace helpers (BPM → running pace) ─────────────────────────────────────
 
@@ -211,7 +215,8 @@ def get_running_route(
         return None
     speed_m_per_min = 1000.0 / pace_min_per_km
     target_distance_m = speed_m_per_min * workout_minutes
-    half_m = target_distance_m / 2.0
+    # Use a closer turn point: real paths are ~PATH_OVERHEAD_FACTOR x straight-line
+    half_m = (target_distance_m / 2.0) / PATH_OVERHEAD_FACTOR
 
     # Turn point (north then back)
     turn_lon, turn_lat = _project_point(lon, lat, half_m, 0.0)

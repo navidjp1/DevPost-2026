@@ -240,6 +240,19 @@ workout_minutes = st.slider(
     step=5,
 )
 
+DEDALUS_MODEL_OPTIONS = [
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "google/gemini-2.5-pro",
+    "google/gemini-2.0-flash",
+]
+dedalus_model = st.selectbox(
+    "Dedalus model (playlist curation)",
+    options=DEDALUS_MODEL_OPTIONS,
+    index=0,
+    help="AI model used by Dedalus for discovery hints and track ordering.",
+)
+
 st.divider()
 
 # =====================================================================
@@ -302,6 +315,7 @@ if generate:
             familiar_tracks=all_tracks,
             workout_minutes=workout_minutes,
             genre_pref=genre_pref if genre_pref.strip() else None,
+            dedalus_model=dedalus_model,
         )
         status.update(label="✅ Playlist curated (Dedalus)", state="complete")
 
@@ -327,6 +341,7 @@ if generate:
     st.session_state["generated_plan"] = plan
     st.session_state["generated_stats"] = stats
     st.session_state["generated_workout_minutes"] = workout_minutes
+    st.session_state["generated_dedalus_model"] = dedalus_model
     st.session_state["generated_runner_age"] = runner_age
     st.session_state["generated_runner_fitness"] = runner_fitness
     st.session_state["generated_runner_goal"] = runner_goal
@@ -396,12 +411,12 @@ if "generated_playlist" in st.session_state:
     c3.metric("BPM Range", f"{stats['min_bpm']}–{stats['max_bpm']}")
     c4.metric("Avg BPM", stats["avg_bpm"])
 
-    # Source breakdown
-    familiar_count = sum(1 for t in playlist if t.get("source") == "familiar")
-    discovery_count = sum(1 for t in playlist if t.get("source") == "discovery")
-    s1, s2 = st.columns(2)
-    s1.metric("🟢 Familiar Tracks", familiar_count)
-    s2.metric("🟣 New Discoveries", discovery_count)
+    # # Source breakdown
+    # familiar_count = sum(1 for t in playlist if t.get("source") == "familiar")
+    # discovery_count = sum(1 for t in playlist if t.get("source") == "discovery")
+    # s1, s2 = st.columns(2)
+    # s1.metric("🟢 Familiar Tracks", familiar_count)
+    # s2.metric("🟣 New Discoveries", discovery_count)
 
     # ── BPM curve chart ─────────────────────────────────────────────
     st.subheader("Your Personalised BPM Curve")
@@ -462,6 +477,7 @@ if "generated_playlist" in st.session_state:
                 min_bpm=stats["min_bpm"],
                 max_bpm=stats["max_bpm"],
                 total_duration_min=stats["total_duration_min"],
+                model=st.session_state.get("generated_dedalus_model"),
             )
     insights = st.session_state["generated_insights"]
 

@@ -13,7 +13,7 @@ import requests
 from bpm_service import enrich_tracks_with_bpm, search_tracks_by_bpm
 
 DEDALUS_API_URL = "https://api.dedaluslabs.ai/v1/chat/completions"
-MODEL = "openai/gpt-4o"
+MODEL = "google/gemini-2.5-pro"
 
 # Target mix: 70% familiar / 30% discovery (adjustable)
 FAMILIAR_RATIO = 0.70
@@ -23,7 +23,7 @@ def _dedalus_api_key() -> str:
     return os.getenv("DEDALUS_API_KEY", "")
 
 
-def _call_dedalus(system_prompt: str, user_prompt: str) -> str:
+def _call_dedalus(system_prompt: str, user_prompt: str, model: str | None = None) -> str:
     """Send a chat completion to Dedalus and return assistant text."""
     api_key = _dedalus_api_key()
     if not api_key:
@@ -36,7 +36,7 @@ def _call_dedalus(system_prompt: str, user_prompt: str) -> str:
             "Content-Type": "application/json",
         },
         json={
-            "model": MODEL,
+            "model": model or MODEL,
             "messages": [
                 {"role": "user", "content": user_prompt},
             ],
@@ -119,6 +119,7 @@ def _infer_genres(tracks: list[dict]) -> str:
 def _ask_dedalus_discovery_hints(
     familiar_tracks: list[dict],
     genre_pref: str | None = None,
+    model: str | None = None,
 ) -> dict:
     """
     Ask Dedalus to suggest genres and artist hints for discovering new
@@ -174,7 +175,7 @@ Rules:
     }
 
     try:
-        raw = _call_dedalus(system_prompt, user_prompt)
+        raw = _call_dedalus(system_prompt, user_prompt, model=model)
         result = json.loads(raw)
         genres = result.get("genres", [])
         artist_hints = result.get("artist_hints", [])
@@ -193,6 +194,7 @@ def _ask_dedalus_to_curate(
     candidates: list[dict],
     target_duration_ms: int,
     bpm_range: list[int],
+    model: str | None = None,
 ) -> list[str]:
     """
     Send candidate tracks to Dedalus and ask it to pick and order the
@@ -244,7 +246,7 @@ You MUST include enough tracks so their combined duration_ms totals at least {ta
 """
 
     try:
-        raw = _call_dedalus(system_prompt, user_prompt)
+        raw = _call_dedalus(system_prompt, user_prompt, model=model)
         result = json.loads(raw)
         return result.get("track_ids", [])
     except Exception:
@@ -269,6 +271,7 @@ def generate_health_insights(
     min_bpm: int,
     max_bpm: int,
     total_duration_min: float,
+    model: str | None = None,
 ) -> dict:
     """
     After the playlist is built, generate health insights about the workout.
@@ -337,7 +340,7 @@ Return a JSON object with EXACTLY these keys:
     }
 
     try:
-        raw = _call_dedalus(system_prompt, user_prompt)
+        raw = _call_dedalus(system_prompt, user_prompt, model=model)
         insights = json.loads(raw)
 
         required = [
@@ -361,6 +364,7 @@ def curate_playlist(
     familiar_tracks: list[dict],
     workout_minutes: int,
     genre_pref: str | None = None,
+    dedalus_model: str | None = None,
 ) -> list[dict]:
     """
     Build a curated playlist using the workout plan from Agent 1.
@@ -377,6 +381,8 @@ def curate_playlist(
         Target workout duration.
     genre_pref : str or None
         User-provided genre preference (used when no playlists selected).
+    dedalus_model : str or None
+        Dedalus model ID for curation (e.g. openai/gpt-4o). If None, module default is used.
 
     Returns
     -------
@@ -407,7 +413,7 @@ def curate_playlist(
 
     # ── Ask Dedalus for discovery hints (genres + artist hints) ─────
     # This gives us AI-suggested genres and artists to diversify the pool
-    discovery_hints = _ask_dedalus_discovery_hints(familiar_with_bpm, genre_pref)
+    discovery_hints = _ask_dedalus_discovery_hints(familiar_with_bpm, genre_pref, model=dedalus_model)
     hint_genres = discovery_hints.get("genres", [])
     hint_artists = discovery_hints.get("artist_hints", [])
 
@@ -472,6 +478,7 @@ def curate_playlist(
             candidates=candidates,
             target_duration_ms=target_ms,
             bpm_range=phase_ranges[phase],
+            model=dedalus_model,
         )
 
         # Build ordered track list from IDs (skip duplicates)
