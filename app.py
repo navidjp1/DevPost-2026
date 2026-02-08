@@ -586,7 +586,7 @@ if "generated_playlist" in st.session_state:
         speed_m_per_min = 1000 / pace_min_per_km if pace_min_per_km else 0
         est_run_min = round(summary["distance_m"] / speed_m_per_min) if speed_m_per_min else 0
 
-        st.metric("Route distance", f"{summary['distance_m'] / 1000:.1f} km")
+        st.metric("Route distance", f"{summary['distance_m'] / 1609.34:.1f} mi")
         st.metric("Est. run time", f"~{est_run_min} min")
         st.caption(f"Planned workout: {workout_minutes} min")
 
