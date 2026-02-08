@@ -300,11 +300,47 @@ if generate:
         )
         st.stop()
 
+
     # Store in session state so results persist after Save button click
     stats = playlist_stats(playlist)
     total_ms = workout_minutes * 60 * 1000
     warmup_target = total_ms * plan["warmup_frac"]
     peak_target = total_ms * plan["peak_frac"]
+
+    cum_ms = 0
+    warmup_count = 0
+    for t in playlist:
+        cum_ms += t["duration_ms"]
+        if cum_ms <= warmup_target:
+            warmup_count += 1
+        else:
+            break
+
+    cum_ms = 0
+    peak_count = 0
+    for t in playlist[warmup_count:]:
+        cum_ms += t["duration_ms"]
+        if cum_ms <= peak_target:
+            peak_count += 1
+        else:
+            break
+
+    # Clear any previously saved URL and cached insights when generating a new playlist
+    if "saved_spotify_url" in st.session_state:
+        del st.session_state["saved_spotify_url"]
+    if "generated_insights" in st.session_state:
+        del st.session_state["generated_insights"]
+
+    st.session_state["generated_playlist"] = playlist
+    st.session_state["generated_plan"] = plan
+    st.session_state["generated_stats"] = stats
+    st.session_state["generated_workout_minutes"] = workout_minutes
+    st.session_state["generated_warmup_count"] = warmup_count
+    st.session_state["generated_peak_count"] = peak_count
+    st.session_state["generated_runner_age"] = runner_age
+    st.session_state["generated_runner_fitness"] = runner_fitness
+    st.session_state["generated_runner_goal"] = runner_goal
+    st.session_state["generated_runner_health"] = runner_health
 
     cum_ms = 0
     warmup_count = 0
