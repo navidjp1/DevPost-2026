@@ -333,32 +333,8 @@ if generate:
         )
         st.stop()
 
-
     # Store in session state so results persist after Save button click
     stats = playlist_stats(playlist)
-<<<<<<< HEAD
-=======
-    total_ms = workout_minutes * 60 * 1000
-    warmup_target = total_ms * plan["warmup_frac"]
-    peak_target = total_ms * plan["peak_frac"]
-
-    cum_ms = 0
-    warmup_count = 0
-    for t in playlist:
-        cum_ms += t["duration_ms"]
-        if cum_ms <= warmup_target:
-            warmup_count += 1
-        else:
-            break
-
-    cum_ms = 0
-    peak_count = 0
-    for t in playlist[warmup_count:]:
-        cum_ms += t["duration_ms"]
-        if cum_ms <= peak_target:
-            peak_count += 1
-        else:
-            break
 
     # Clear any previously saved URL and cached insights when generating a new playlist
     if "saved_spotify_url" in st.session_state:
@@ -370,43 +346,6 @@ if generate:
     st.session_state["generated_plan"] = plan
     st.session_state["generated_stats"] = stats
     st.session_state["generated_workout_minutes"] = workout_minutes
-    st.session_state["generated_warmup_count"] = warmup_count
-    st.session_state["generated_peak_count"] = peak_count
-    st.session_state["generated_runner_age"] = runner_age
-    st.session_state["generated_runner_fitness"] = runner_fitness
-    st.session_state["generated_runner_goal"] = runner_goal
-    st.session_state["generated_runner_health"] = runner_health
-
-    cum_ms = 0
-    warmup_count = 0
-    for t in playlist:
-        cum_ms += t["duration_ms"]
-        if cum_ms <= warmup_target:
-            warmup_count += 1
-        else:
-            break
-
-    cum_ms = 0
-    peak_count = 0
-    for t in playlist[warmup_count:]:
-        cum_ms += t["duration_ms"]
-        if cum_ms <= peak_target:
-            peak_count += 1
-        else:
-            break
-
-    # Clear any previously saved URL and cached insights when generating a new playlist
-    if "saved_spotify_url" in st.session_state:
-        del st.session_state["saved_spotify_url"]
-    if "generated_insights" in st.session_state:
-        del st.session_state["generated_insights"]
-
-    st.session_state["generated_playlist"] = playlist
-    st.session_state["generated_plan"] = plan
-    st.session_state["generated_stats"] = stats
-    st.session_state["generated_workout_minutes"] = workout_minutes
-    st.session_state["generated_warmup_count"] = warmup_count
-    st.session_state["generated_peak_count"] = peak_count
     st.session_state["generated_runner_age"] = runner_age
     st.session_state["generated_runner_fitness"] = runner_fitness
     st.session_state["generated_runner_goal"] = runner_goal
@@ -420,13 +359,10 @@ if "generated_playlist" in st.session_state:
     plan = st.session_state["generated_plan"]
     stats = st.session_state["generated_stats"]
     workout_minutes = st.session_state["generated_workout_minutes"]
-    warmup_count = st.session_state["generated_warmup_count"]
-    peak_count = st.session_state["generated_peak_count"]
     runner_age = st.session_state["generated_runner_age"]
     runner_fitness = st.session_state["generated_runner_fitness"]
     runner_goal = st.session_state["generated_runner_goal"]
     runner_health = st.session_state["generated_runner_health"]
->>>>>>> 627a7d76ba12700f9816f4542a5fd4a75b458607
 
     st.success("Your personalised workout playlist is ready!")
 
@@ -437,7 +373,6 @@ if "generated_playlist" in st.session_state:
     c3.metric("BPM Range", f"{stats['min_bpm']}–{stats['max_bpm']}")
     c4.metric("Avg BPM", stats["avg_bpm"])
 
-<<<<<<< HEAD
     # Source breakdown
     familiar_count = sum(1 for t in playlist if t.get("source") == "familiar")
     discovery_count = sum(1 for t in playlist if t.get("source") == "discovery")
@@ -445,8 +380,6 @@ if "generated_playlist" in st.session_state:
     s1.metric("🟢 Familiar Tracks", familiar_count)
     s2.metric("🟣 New Discoveries", discovery_count)
 
-=======
->>>>>>> 627a7d76ba12700f9816f4542a5fd4a75b458607
     # ── BPM curve chart ─────────────────────────────────────────────
     st.subheader("Your Personalised BPM Curve")
     bpm_data = [{"Track #": i + 1, "BPM": t["bpm"]} for i, t in enumerate(playlist)]
