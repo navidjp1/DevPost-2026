@@ -2,7 +2,7 @@
 
 Generate a Spotify playlist that matches your workout intensity — songs ramp up from a chill warmup to peak energy, then bring you back down for a cool-off.
 
-BPM data powered by [GetSongBPM.com](https://getsongbpm.com)
+## BPM data powered by GetSongBPM.com
 
 ## Quick Start
 
