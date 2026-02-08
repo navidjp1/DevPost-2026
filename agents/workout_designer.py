@@ -7,6 +7,7 @@ BPM targets, heart rate zones, and phase durations.
 
 import json
 import os
+import re
 import requests
 
 K2_API_URL = "https://api.k2think.ai/v1/chat/completions"
@@ -15,6 +16,26 @@ MODEL = "MBZUAI-IFM/K2-Think-v2"
 
 def _k2_api_key() -> str:
     return os.getenv("K2_API_KEY", "")
+
+
+def _extract_json(text: str) -> str:
+    """
+    Extract the JSON object from K2-Think's response.
+
+    K2-Think is a reasoning model that returns a <think>...</think> block
+    with chain-of-thought reasoning, followed by the actual JSON answer.
+    This function strips the thinking block and extracts the JSON.
+    """
+    # Strip everything up to and including </think>
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1]
+
+    # Find the first { ... } JSON object in the remaining text
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        return match.group(0)
+
+    return text.strip()
 
 
 def _call_k2think(system_prompt: str, user_prompt: str) -> str:
@@ -43,7 +64,9 @@ def _call_k2think(system_prompt: str, user_prompt: str) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    print(data)
+    raw_content = data["choices"][0]["message"]["content"]
+    return _extract_json(raw_content)
 
 
 # ── Hardcoded defaults (used when the API is unavailable) ──────────────

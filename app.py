@@ -238,7 +238,6 @@ if not can_generate:
 if generate:
     # ── Agent 1: Workout Designer (K2-Think) ─────────────────────────
     with st.status("🤖 Agent 1: K2-Think is designing your workout…", expanded=True) as status:
-        st.write("Analysing your profile and goals…")
         plan = design_workout(
             age=runner_age,
             fitness_level=runner_fitness,
@@ -247,47 +246,6 @@ if generate:
             workout_minutes=workout_minutes,
         )
         status.update(label="✅ Workout plan ready (K2-Think)", state="complete")
-
-    # Show coaching notes
-    st.markdown(
-        f"""
-        <div class="coach-card">
-            <strong>🧠 AI Coach says:</strong><br><br>
-            {plan.get("coaching_notes", "")}
-            <br><br>
-            <small>
-                Warmup {int(plan["warmup_frac"]*100)}% ·
-                Peak {int(plan["peak_frac"]*100)}% ·
-                Cooldown {int(plan["cooldown_frac"]*100)}%
-            </small>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Show target HR zones
-    hr = plan.get("target_hr_zones", {})
-    if hr:
-        z1, z2, z3 = st.columns(3)
-        z1.metric("🟡 Warmup HR", hr.get("warmup", "—"))
-        z2.metric("🔴 Peak HR", hr.get("peak", "—"))
-        z3.metric("🔵 Cooldown HR", hr.get("cooldown", "—"))
-
-    # Show recommended music BPM ranges (now as [min, max] arrays)
-    b1, b2, b3 = st.columns(3)
-    warmup_bpm = plan.get("warmup_bpm_range", [90, 120])
-    peak_bpm = plan.get("peak_bpm_range", [140, 180])
-    cooldown_bpm = plan.get("cooldown_bpm_range", [90, 120])
-    b1.metric("🟡 Warmup BPM", f"{warmup_bpm[0]}–{warmup_bpm[1]}")
-    b2.metric("🔴 Peak BPM", f"{peak_bpm[0]}–{peak_bpm[1]}")
-    b3.metric("🔵 Cooldown BPM", f"{cooldown_bpm[0]}–{cooldown_bpm[1]}")
-
-    # Show safety notes if present
-    if plan.get("safety_notes"):
-        with st.expander("⚠️ Safety Notes from AI Coach", expanded=bool(runner_health)):
-            st.write(plan["safety_notes"])
-
-    st.divider()
 
     # ── Gather tracks from selected playlists ───────────────────────
     all_tracks: list[dict] = []
@@ -365,6 +323,48 @@ if "generated_playlist" in st.session_state:
     runner_health = st.session_state["generated_runner_health"]
 
     st.success("Your personalised workout playlist is ready!")
+
+    # ── AI Coach Plan ────────────────────────────────────────────────
+    st.markdown(
+        f"""
+        <div class="coach-card">
+            <strong>🧠 AI Coach says:</strong><br><br>
+            {plan.get("coaching_notes", "")}
+            <br><br>
+            <small>
+                Warmup {int(plan["warmup_frac"]*100)}% ·
+                Peak {int(plan["peak_frac"]*100)}% ·
+                Cooldown {int(plan["cooldown_frac"]*100)}%
+            </small>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("Workout plan designed by K2-Think v2")
+
+    # Target HR zones
+    hr = plan.get("target_hr_zones", {})
+    if hr:
+        z1, z2, z3 = st.columns(3)
+        z1.metric("🟡 Warmup HR", hr.get("warmup", "—"))
+        z2.metric("🔴 Peak HR", hr.get("peak", "—"))
+        z3.metric("🔵 Cooldown HR", hr.get("cooldown", "—"))
+
+    # Recommended music BPM ranges
+    b1, b2, b3 = st.columns(3)
+    warmup_bpm = plan.get("warmup_bpm_range", [90, 120])
+    peak_bpm = plan.get("peak_bpm_range", [140, 180])
+    cooldown_bpm = plan.get("cooldown_bpm_range", [90, 120])
+    b1.metric("🟡 Warmup BPM", f"{warmup_bpm[0]}–{warmup_bpm[1]}")
+    b2.metric("🔴 Peak BPM", f"{peak_bpm[0]}–{peak_bpm[1]}")
+    b3.metric("🔵 Cooldown BPM", f"{cooldown_bpm[0]}–{cooldown_bpm[1]}")
+
+    # Safety notes from AI coach
+    if plan.get("safety_notes"):
+        with st.expander("⚠️ Safety Notes from AI Coach", expanded=bool(runner_health)):
+            st.write(plan["safety_notes"])
+
+    st.divider()
 
     # ── Stats row ───────────────────────────────────────────────────
     c1, c2, c3, c4 = st.columns(4)
