@@ -2,3 +2,4 @@ streamlit
 spotipy
 requests
 python-dotenv
+pandas

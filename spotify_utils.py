@@ -20,7 +20,7 @@ def _get_auth_manager() -> SpotifyOAuth:
     return SpotifyOAuth(
         client_id=os.getenv("SPOTIFY_CLIENT_ID"),
         client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
-        redirect_uri=os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8501"),
+        redirect_uri=os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8501"),
         scope=SCOPES,
         cache_handler=spotipy.cache_handler.MemoryCacheHandler(
             token_info=st.session_state.get("token_info")

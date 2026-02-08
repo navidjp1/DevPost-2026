@@ -2,7 +2,7 @@
 
 Generate a Spotify playlist that matches your workout intensity — songs ramp up from a chill warmup to peak energy, then bring you back down for a cool-off.
 
-## BPM data powered by GetSongBPM.com
+BPM data powered by [GetSongBPM.com](https://getsongbpm.com)
 
 ## Quick Start
 
@@ -23,8 +23,10 @@ cp .env.example .env
 You need:
 
 -   **Spotify Developer App** — get credentials at https://developer.spotify.com/dashboard
-    -   Set the Redirect URI to `http://localhost:8501`
--   **GetSongBPM API Key** — sign up at https://getsongbpm.com/api
+    -   Set the Redirect URI to `http://127.0.0.1:8501`
+-   **GetSongBPM API Key** (optional fallback) — sign up at https://getsongbpm.com/api
+    -   The app will try Spotify's audio_features API first (may work in dev mode)
+    -   GetSongBPM is only used as a fallback if Spotify doesn't return BPM data
 
 ### 3. Run the app
 

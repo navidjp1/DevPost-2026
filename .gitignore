@@ -13,6 +13,9 @@ build/
 .cache
 .cache-*
 
+# Data files (large CSV)
+data/
+
 # Virtual environment
 venv/
 .venv/
