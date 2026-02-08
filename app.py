@@ -208,6 +208,7 @@ generate = st.button(
 if len(selected_ids) == 0:
     st.info("Select at least one playlist above to get started.")
 
+# When Generate is clicked, run the full generation pipeline and store in session state
 if generate:
     # ── AI Coach: personalised plan ─────────────────────────────────
     with st.status("🤖 AI Coach is building your plan…", expanded=True) as status:
@@ -299,34 +300,9 @@ if generate:
         )
         st.stop()
 
-    # Store in session state
-    st.session_state["generated_playlist"] = playlist
 
-    # =====================================================================
-    # SCREEN 5 – Results
-    # =====================================================================
+    # Store in session state so results persist after Save button click
     stats = playlist_stats(playlist)
-
-    st.success("Your personalised workout playlist is ready!")
-
-    # ── Stats row ───────────────────────────────────────────────────
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Tracks", stats["total_tracks"])
-    c2.metric("Duration", f"{stats['total_duration_min']} min")
-    c3.metric("BPM Range", f"{stats['min_bpm']}–{stats['max_bpm']}")
-    c4.metric("Avg BPM", stats["avg_bpm"])
-
-    # ── BPM curve chart ─────────────────────────────────────────────
-    st.subheader("Your Personalised BPM Curve")
-    bpm_data = [{"Track #": i + 1, "BPM": t["bpm"]} for i, t in enumerate(playlist)]
-    st.area_chart(
-        bpm_data,
-        x="Track #",
-        y="BPM",
-        color="#ef4444",
-    )
-
-    # ── Figure out phase boundaries for labels ──────────────────────
     total_ms = workout_minutes * 60 * 1000
     warmup_target = total_ms * plan["warmup_frac"]
     peak_target = total_ms * plan["peak_frac"]
@@ -348,6 +324,92 @@ if generate:
             peak_count += 1
         else:
             break
+
+    # Clear any previously saved URL and cached insights when generating a new playlist
+    if "saved_spotify_url" in st.session_state:
+        del st.session_state["saved_spotify_url"]
+    if "generated_insights" in st.session_state:
+        del st.session_state["generated_insights"]
+
+    st.session_state["generated_playlist"] = playlist
+    st.session_state["generated_plan"] = plan
+    st.session_state["generated_stats"] = stats
+    st.session_state["generated_workout_minutes"] = workout_minutes
+    st.session_state["generated_warmup_count"] = warmup_count
+    st.session_state["generated_peak_count"] = peak_count
+    st.session_state["generated_runner_age"] = runner_age
+    st.session_state["generated_runner_fitness"] = runner_fitness
+    st.session_state["generated_runner_goal"] = runner_goal
+    st.session_state["generated_runner_health"] = runner_health
+
+    cum_ms = 0
+    warmup_count = 0
+    for t in playlist:
+        cum_ms += t["duration_ms"]
+        if cum_ms <= warmup_target:
+            warmup_count += 1
+        else:
+            break
+
+    cum_ms = 0
+    peak_count = 0
+    for t in playlist[warmup_count:]:
+        cum_ms += t["duration_ms"]
+        if cum_ms <= peak_target:
+            peak_count += 1
+        else:
+            break
+
+    # Clear any previously saved URL and cached insights when generating a new playlist
+    if "saved_spotify_url" in st.session_state:
+        del st.session_state["saved_spotify_url"]
+    if "generated_insights" in st.session_state:
+        del st.session_state["generated_insights"]
+
+    st.session_state["generated_playlist"] = playlist
+    st.session_state["generated_plan"] = plan
+    st.session_state["generated_stats"] = stats
+    st.session_state["generated_workout_minutes"] = workout_minutes
+    st.session_state["generated_warmup_count"] = warmup_count
+    st.session_state["generated_peak_count"] = peak_count
+    st.session_state["generated_runner_age"] = runner_age
+    st.session_state["generated_runner_fitness"] = runner_fitness
+    st.session_state["generated_runner_goal"] = runner_goal
+    st.session_state["generated_runner_health"] = runner_health
+
+# =====================================================================
+# SCREEN 5 – Results (shown whenever we have a generated playlist)
+# =====================================================================
+if "generated_playlist" in st.session_state:
+    playlist = st.session_state["generated_playlist"]
+    plan = st.session_state["generated_plan"]
+    stats = st.session_state["generated_stats"]
+    workout_minutes = st.session_state["generated_workout_minutes"]
+    warmup_count = st.session_state["generated_warmup_count"]
+    peak_count = st.session_state["generated_peak_count"]
+    runner_age = st.session_state["generated_runner_age"]
+    runner_fitness = st.session_state["generated_runner_fitness"]
+    runner_goal = st.session_state["generated_runner_goal"]
+    runner_health = st.session_state["generated_runner_health"]
+
+    st.success("Your personalised workout playlist is ready!")
+
+    # ── Stats row ───────────────────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Tracks", stats["total_tracks"])
+    c2.metric("Duration", f"{stats['total_duration_min']} min")
+    c3.metric("BPM Range", f"{stats['min_bpm']}–{stats['max_bpm']}")
+    c4.metric("Avg BPM", stats["avg_bpm"])
+
+    # ── BPM curve chart ─────────────────────────────────────────────
+    st.subheader("Your Personalised BPM Curve")
+    bpm_data = [{"Track #": i + 1, "BPM": t["bpm"]} for i, t in enumerate(playlist)]
+    st.area_chart(
+        bpm_data,
+        x="Track #",
+        y="BPM",
+        color="#ef4444",
+    )
 
     # ── Track list ──────────────────────────────────────────────────
     st.subheader("Tracklist")
@@ -381,19 +443,21 @@ if generate:
     st.subheader("🩺 Health Insights")
     st.caption("Powered by AI coaching from Dedalus Labs")
 
-    with st.spinner("Generating health insights…"):
-        insights = generate_health_insights(
-            age=runner_age,
-            fitness_level=runner_fitness,
-            goal=runner_goal,
-            health_notes=runner_health,
-            workout_minutes=workout_minutes,
-            total_tracks=stats["total_tracks"],
-            avg_bpm=stats["avg_bpm"],
-            min_bpm=stats["min_bpm"],
-            max_bpm=stats["max_bpm"],
-            total_duration_min=stats["total_duration_min"],
-        )
+    if "generated_insights" not in st.session_state:
+        with st.spinner("Generating health insights…"):
+            st.session_state["generated_insights"] = generate_health_insights(
+                age=runner_age,
+                fitness_level=runner_fitness,
+                goal=runner_goal,
+                health_notes=runner_health,
+                workout_minutes=workout_minutes,
+                total_tracks=stats["total_tracks"],
+                avg_bpm=stats["avg_bpm"],
+                min_bpm=stats["min_bpm"],
+                max_bpm=stats["max_bpm"],
+                total_duration_min=stats["total_duration_min"],
+            )
+    insights = st.session_state["generated_insights"]
 
     # Calories
     ic1, ic2 = st.columns(2)
@@ -447,5 +511,18 @@ if generate:
                     f"· {runner_fitness} · {runner_goal}"
                 ),
             )
-        st.success(f"Playlist created! [Open in Spotify]({url})")
+            st.session_state["saved_spotify_url"] = url
         st.balloons()
+
+    # Show success + Open in Spotify link (persists after Save, so graph stays visible)
+    if "saved_spotify_url" in st.session_state:
+        url = st.session_state["saved_spotify_url"]
+        st.success("Playlist saved to your Spotify account!")
+        # Opens in new tab so user keeps the app visible
+        st.markdown(
+            f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
+            'style="display:inline-block;background:#1DB954;color:white;padding:10px 24px;'
+            'border-radius:20px;text-decoration:none;font-weight:600;text-align:center;">'
+            "🎵 Open in Spotify</a>",
+            unsafe_allow_html=True,
+        )
