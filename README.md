@@ -20,13 +20,17 @@ Copy `.env.example` to `.env` and fill in your credentials:
 cp .env.example .env
 ```
 
+### 2. Download the BPM dataset
+
+Download the Spotify tracks dataset from Hugging Face:
+
+mkdir -p data
+curl -L -o data/spotify_tracks.csv https://huggingface.co/datasets/maharshipandya/spotify-tracks-dataset/resolve/main/dataset.csv
+
 You need:
 
 -   **Spotify Developer App** — get credentials at https://developer.spotify.com/dashboard
     -   Set the Redirect URI to `http://127.0.0.1:8501`
--   **GetSongBPM API Key** (optional fallback) — sign up at https://getsongbpm.com/api
-    -   The app will try Spotify's audio_features API first (may work in dev mode)
-    -   GetSongBPM is only used as a fallback if Spotify doesn't return BPM data
 
 ### 3. Run the app
 
